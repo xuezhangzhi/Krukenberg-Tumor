@@ -1,0 +1,821 @@
+
+```{r qc umap}
+rm(list = ls())
+source("input/common.R")
+library(RColorBrewer)
+library(corrplot)
+library(stringr)
+mat<-readRDS("mat.rds")
+all1<-mat[which(mat$subtype %in% c("BC","CC","AG","GG")),-c(2:12)]
+all2<-all1[,-c(1:2)]
+all2[is.na(all2)]<-NA
+all3<-all2[, apply(all2,2,function(x) {sum(is.na(x))/nrow(all2)}) <1]
+all4<-cbind(mat[,1:13],all3)
+type<-log2(all3)
+type$label<-all1$subtype
+all3_batch<- data.frame(str_split_fixed( all1$batch,"_",2 ))
+all3_batch$X1<-gsub("b","",all3_batch$X1)
+batch<-log2(all3)
+batch$label<-as.factor(as.numeric(all3_batch$X1))
+
+color1<-c("#D9942C","#8C2826","#80AA31","#5B7BAA")
+color2<-c(brewer.pal(11,"YlOrRd")[4:9],brewer.pal(11,"YlGnBu")[4:9],brewer.pal(11,"Purples")[4:9],brewer.pal(11,"YlGn")[4:8])
+set.seed(2021)
+features<-ncol(type)-1
+Plottype<-drawUMAP(strTitle = paste0( features," features"),type,ptColors = color1,rowNormalization = F,colNormalization = T)
+Plotbatch<-drawUMAP(strTitle = paste0( features," features"),batch,ptColors = color2,rowNormalization = T,colNormalization = F)
+
+
+ggsave(plot=Plottype, "QC/AG_GG_BC_CC_4types.pdf",width = 8,height = 8)
+
+ggsave(plot=Plotbatch, "QC/AG_GG_BC_CC_23batchs.pdf",width = 8,height = 8)
+
+
+```
+
+```{r QC pool  CV}
+
+rm(list=ls())
+library(stringr)
+library(GGally)
+library(corrplot)
+library(PerformanceAnalytics)
+library(vioplot)
+raw2<- readRDS("ml_cols.rds")
+name<-data.frame(str_split_fixed(names(raw2),"_",5))
+names(raw2)<-c(as.matrix(name$X4))
+mouseliver <- raw2[which(apply(raw2,1,function(x){ sum(x,na.rm = T) })>0),]
+mouseliver<-log2(mouseliver)
+
+raw2<- readRDS("pool_cols.rds")
+name<-data.frame(str_split_fixed(names(raw2),"_",6))
+names(raw2)<-c(as.matrix(name$X5))
+pool <- raw2[which(apply(raw2,1,function(x){ sum(x,na.rm = T) })>0),]
+pool<-log2(pool)
+
+
+mouseliver_cv<-c(apply(mouseliver,1,function(x){sd(x,na.rm = T)/mean(x,na.rm=T)}))
+pool_cv<-    c(apply(pool,1,function(x){sd(x,na.rm = T)/mean(x,na.rm=T)}))
+
+
+library(vioplot)
+vioplot(mouseliver_cv,pool_cv,
+        areaEqual=FALSE, col=c("seagreen4", "seagreen4"),
+      rectCol=c("seagreen4","seagreen4"),
+     lineCol=c("black", "black"),
+    border=c("black","black"),
+ names=c( "Mouse Liver"  ,"Pool"),
+      main="", xlab=, ylab="Coefficient of variation",plotCentre = "point")
+fivenum(mouseliver_cv)
+fivenum(pool_cv)
+```
+
+```{r QC pool correlation}
+rm(list=ls())
+library(stringr)
+library(GGally)
+library(corrplot)
+library(PerformanceAnalytics)
+raw2<-readRDS("pool_cols.rds")
+name<-data.frame(str_split_fixed(names(raw2),"_",6))
+names(raw2)<-c(as.matrix(name$X5))
+pool <- raw2[which(apply(raw2,1,function(x){ sum(x,na.rm = T) })>0),]
+pool<-log2(pool)
+
+my<-function (R, histogram = TRUE, method = c("pearson", "kendall", 
+    "spearman"), ...) 
+{
+    x = checkData(R, method = "matrix")
+    if (missing(method)) 
+        method = method[1]
+    cormeth <- method
+    
+    textPanel2 <- function(x,y , txt, cex, font) text(x=0.5, 
+      y=0.3, txt, cex = 0.6, font = font)
+    
+    panel.cor <- function(x, y, digits = 2, prefix = "", 
+        use = "pairwise.complete.obs", method = cormeth, 
+        cex.cor, ...) {
+        usr <- par("usr")
+        on.exit(par(usr))
+        par(usr = c(0, 1, 0, 1))
+        r <- cor(x, y, use = use, method = method)
+        txt <- format(c(r, 0.123456789), digits = digits)[1]
+        txt <- paste(prefix, txt, sep = "")
+        if (missing(cex.cor)) 
+            cex <- 0.5/strwidth(txt)
+        test <- cor.test(as.numeric(x), as.numeric(y), method = method)
+        Signif <- symnum(test$p.value, corr = FALSE, na = FALSE, 
+            cutpoints = c(0, 0.001, 0.01, 0.05, 0.1, 1), symbols = c("***", 
+                "**", "*", ".", " "))
+        text(0.5, 0.5, txt, cex = cex * (abs(r) + 0.3)/1.3)
+        text(0.8, 0.8, Signif, cex = cex, col = 2)
+    }
+    f <- function(t) {
+        dnorm(t, mean = mean(x), sd = sd.xts(x))
+    }
+    dotargs <- list(...)
+    dotargs$method <- NULL
+    rm(method)
+    
+    #####
+    hist.panel = function(x, ... = NULL) {
+        par(new = TRUE)
+        hist(x, col = "white", probability =TRUE, border = NA,
+        axes = FALSE, main = "", breaks = "FD")
+        lines(density(x, na.rm = TRUE), col = "red", lwd = 1)
+        rug(x)
+    }
+    #######
+    
+
+   panel.smooth2<- function (x, y, col=alpha("#4C7BB2",alpha = 0.6), bg = NA, pch = par("pch"), 
+    cex = 0.25, col.smooth = "black", span = 2/3, iter = 3,
+    ...) 
+{
+    points(x, y, pch = pch, col = col, bg = bg, cex = cex)
+    ok <- is.finite(x) & is.finite(y)
+    if (any(ok)) 
+        lines(stats::lowess(x[ok], y[ok], f = span, iter = iter), 
+            col = col.smooth, ...)
+}
+    
+    if (histogram) 
+        pairs(x,  gap = 0, lower.panel = panel.smooth2, upper.panel = panel.cor, 
+            diag.panel = hist.panel,text.panel= textPanel2 )
+    else pairs(x, gap = 0, lower.panel = panel.smooth2, upper.panel = panel.cor)
+}
+###############################33
+
+pdf("QC/pool_corr.pdf")
+my(pool,histogram = TRUE,pch=20)
+
+```
+
+
+```{r QC Tech rep correlation}
+
+rm(list=ls())
+
+library(PerformanceAnalytics)
+
+
+source("input/datamining_library_ge20200902.R")
+info<-read_excel("input/name.xlsx",sheet = 1)
+info$subtype<-paste0(info$PType,info$Location)
+df<-read.table("input/diann_KRUK_protein_20200828.txt",sep = "\t",stringsAsFactors = F,header = T)
+names(df) <- ge.split(names(df),"\\.mzML",1,"DIA_")
+df1<-df[,-1]
+df1<-log2(df1)
+row.names(df1)<-df[,1]
+##delete protein group
+df2<-df1[-grep(";",row.names(df1)),]
+## average tech rep
+df3<-data.frame(t(df2))
+df3$batch<-row.names(df3)
+df4<-df3[-grep("pool",df3$batch),]
+df4$batch<-gsub("b","",df4$batch)
+df4$batch<-paste0("b",df4$batch)
+df5<-merge(info,df4, by.x="batch", all=F)
+df6<-df5[which(df5$subtype %in% c("BC","CC","AG","GG")),]
+df7<-df6[duplicated(df6$batch),1]
+TecRep<-df6[df6$batch %in% df7,-c(2:12)]
+write_rds(TecRep, "TecRep.rds")
+
+
+TecRep<-readRDS( "TecRep.rds")
+
+
+TecRep2<-data.frame(t(TecRep[,-1]))
+
+names(TecRep2)<-TecRep$batch
+
+
+
+TecRep3<-data.frame(t(TecRep2))
+row.names(TecRep3)<-gsub("[.]1","_rep",row.names(TecRep3))
+TecRep3$batch<-TecRep$batch
+my<-function (R, histogram = TRUE, method = c("pearson", "kendall", 
+    "spearman"), ...) 
+{
+    x = checkData(R, method = "matrix")
+    if (missing(method)) 
+        method = method[1]
+    cormeth <- method
+    
+    textPanel2 <- function(x,y , txt, cex, font) text(x=0.5, 
+      y=0.3, txt, cex = 0.6, font = font)
+    
+    panel.cor <- function(x, y, digits = 2, prefix = "", 
+        use = "pairwise.complete.obs", method = cormeth, 
+        cex.cor, ...) {
+        usr <- par("usr")
+        on.exit(par(usr))
+        par(usr = c(0, 1, 0, 1))
+        r <- cor(x, y, use = use, method = method)
+        txt <- format(c(r, 0.123456789), digits = digits)[1]
+        txt <- paste(prefix, txt, sep = "")
+        if (missing(cex.cor)) 
+            cex <- 0.5/strwidth(txt)
+        test <- cor.test(as.numeric(x), as.numeric(y), method = method)
+        Signif <- symnum(test$p.value, corr = FALSE, na = FALSE, 
+            cutpoints = c(0, 0.001, 0.01, 0.05, 0.1, 1), symbols = c("***", 
+                "**", "*", ".", " "))
+        text(0.5, 0.5, txt, cex = cex * (abs(r) + 0.3)/1.3)
+        text(0.8, 0.8, Signif, cex = cex, col = 2)
+    }
+    f <- function(t) {
+        dnorm(t, mean = mean(x), sd = sd.xts(x))
+    }
+    dotargs <- list(...)
+    dotargs$method <- NULL
+    rm(method)
+    
+    #####
+    hist.panel = function(x, ... = NULL) {
+        par(new = TRUE)
+        hist(x, col = "white", probability =TRUE, border = NA,
+        axes = FALSE, main = "", breaks = "FD")
+        lines(density(x, na.rm = TRUE), col = "red", lwd = 1)
+        rug(x)
+    }
+    #######
+    
+
+   panel.smooth2<- function (x, y, col=alpha("#4C7BB2",alpha = 0.6), bg = NA, pch = par("pch"), 
+    cex = 0.25, col.smooth = "black", span = 2/3, iter = 3,
+    ...) 
+{
+    points(x, y, pch = pch, col = col, bg = bg, cex = cex)
+    ok <- is.finite(x) & is.finite(y)
+    if (any(ok)) 
+        lines(stats::lowess(x[ok], y[ok], f = span, iter = iter), 
+            col = col.smooth, ...)
+}
+    
+    if (histogram) 
+        pairs(x,  gap = 0, lower.panel = panel.smooth2, upper.panel = panel.cor, 
+            diag.panel = hist.panel,text.panel= textPanel2 )
+    else pairs(x, gap = 0, lower.panel = panel.smooth2, upper.panel = panel.cor)
+}
+###############################33
+
+for (i in unique(TecRep3$batch)){
+  
+TecRep_corr<- data.frame(t(TecRep3[which(TecRep3$batch==i),-(ncol(TecRep3))]))
+  TecRep_corr<-TecRep_corr[-1,]
+TecRep_corr[] <- lapply(TecRep_corr, function(x) suppressWarnings(as.numeric(x)))
+  
+  pdf(paste0(i,"_Tech_rep_corr.pdf"))
+  my(TecRep_corr,histogram = TRUE,pch=20)
+dev.off()
+}
+
+
+
+```
+
+
+```{r volcanoplot}
+rm(list=ls())
+
+library(RColorBrewer)
+mat<-readRDS("mat.rds")
+BC_CC1<-mat[which(mat$subtype %in% c("BC","CC")),-c(2:12)]
+
+BC_CC2<-BC_CC1[,-1]
+row.names(BC_CC2)<-BC_CC1$batch
+BC_CC2[is.na(BC_CC2)]<-NA
+
+
+####NA less 70%
+BC_CC3<-BC_CC2[, apply(BC_CC2,2,function(x) {sum(is.na(x))/nrow(BC_CC2)}) < 0.7]
+### volcano
+BC_CC4<-log2(BC_CC3[,-1])
+BC_CC4$subtype<-BC_CC3$subtype
+BC_CC4[is.na(BC_CC4)]<-0
+fd <- data.frame(apply(2^BC_CC4[,-ncol(BC_CC4)],2, function(x) log2((mean(na.omit(x[which(BC_CC3$subtype=="BC")]))/mean(na.omit(x[which(BC_CC3$subtype=="CC")]))))))
+
+pvalue<- data.frame(apply(BC_CC4[,-ncol(BC_CC4)],2, function(x)  t.test(x[which(BC_CC4$subtype=="BC")],x[which(BC_CC4$subtype=="CC")], paired = F, var.equal = F)$p.value ))
+
+vol<-cbind(fd,pvalue)
+names(vol)<-c("fd","P_value")
+
+BC_CC<-data.frame(t(rbind(BC_CC4[,-ncol(BC_CC4)],t(vol))))
+BC_CC$P_value_adjust<-p.adjust(BC_CC$P_value, method="BH")
+pdf("BC_CC_volcano.pdf",width = 6,height = 6)
+plot(BC_CC$fd, -log10(BC_CC$P_value_adjust), col="#00000033", pch=19,cex=3,
+     
+      xlab=paste("log2(fold change)"),
+      ylab="-log10 adjusted p value",
+      main="BC_CC")
+
+up <- subset(BC_CC, BC_CC$P_value_adjust < 0.05 & BC_CC$fd > 0.5)
+down <- subset(BC_CC, BC_CC$P_value_adjust< 0.05 & BC_CC$fd< -0.5)
+dif_BC_CC<-rbind(up[,95:97],down[,95:97])
+write.csv(dif_BC_CC,file = "BC_CC_dif_prot_20250429.csv")
+write.csv(up,file = "BC_CC_up.csv")
+write.csv(down,file = "BC_CC_down.csv")
+
+points(up$fd, -log10(up$P_value_adjust), col=1, bg = brewer.pal(9, "YlOrRd")[6], pch=21, cex=3)
+points(down$fd, -log10(down$P_value_adjust), col = 1,  bg = brewer.pal(11, "RdBu")[9], pch = 21,cex=3)
+  
+abline(h=1.3,v=c(-0.5,0.5),lty=2,lwd=1)
+
+dev.off()
+
+
+###AG_GG
+library(RColorBrewer)
+AG_GG1<-mat[which(mat$subtype %in% c("AG","GG")),-c(2:12)]
+AG_GG2<-AG_GG1[,-1]
+
+AG_GG3 <- AG_GG2[, colSums(is.na(AG_GG2)) < nrow(AG_GG2)]
+row.names(AG_GG2)<-AG_GG1$batch
+AG_GG2[is.na(AG_GG2)]<-NA
+
+
+
+
+####NA less70%
+AG_GG3<-AG_GG2[, apply(AG_GG2,2,function(x) {sum(is.na(x))/nrow(AG_GG2)}) < 0.7]
+### volcano
+AG_GG4<-log2(AG_GG3[,-1])
+AG_GG4$subtype<-AG_GG3$subtype
+AG_GG4[is.na(AG_GG4)]<-0
+fd <- data.frame(apply(2^AG_GG4[,-ncol(AG_GG4)],2, function(x) log2((mean(na.omit(x[which(AG_GG3$subtype=="AG")]))/mean(na.omit(x[which(AG_GG3$subtype=="GG")]))))))
+
+pvalue<- data.frame(apply(AG_GG4[,-ncol(AG_GG4)],2, function(x)  t.test(x[which(AG_GG4$subtype=="AG")],x[which(AG_GG4$subtype=="GG")], paired = F, var.equal = F)$p.value ))
+
+vol<-cbind(fd,pvalue)
+names(vol)<-c("fd","P_value")
+
+AG_GG<-data.frame(t(rbind(AG_GG4[,-ncol(AG_GG4)],t(vol))))
+AG_GG$P_value_adjust<-p.adjust(AG_GG$P_value, method="BH")
+
+
+pdf("AG_GG_volcano.pdf",width = 6,height = 6)
+plot(AG_GG$fd, -log10(AG_GG$P_value_adjust), col="#00000033", pch=19,cex=3,
+     
+      xlab=paste("log2(fold change)"),
+      ylab="-log10 adjusted p value",
+      main="AG_GG")
+
+up <- subset(AG_GG, AG_GG$P_value_adjust < 0.05 & AG_GG$fd > 0.5)
+down <- subset(AG_GG, AG_GG$P_value_adjust< 0.05 & AG_GG$fd< -0.5)
+dif_AG_GG<-rbind(up[,92:94],down[,92:94])
+
+points(up$fd, -log10(up$P_value_adjust), col=1, bg = brewer.pal(9, "YlOrRd")[6], pch=21, cex=3)
+points(down$fd, -log10(down$P_value_adjust), col = 1,  bg = brewer.pal(11, "RdBu")[9], pch = 21,cex=3)
+
+abline(h=1.3,v=c(-0.5,0.5),lty=2,lwd=1)
+
+dev.off()
+
+```
+
+
+
+
+
+
+
+```{r Randomforest for BCAG_CCGG}
+
+rm(list=ls())
+library(readxl)
+library(magrittr)
+library(readxl)
+library(randomForest)
+library(umap)
+library(ROSE)
+library(caret)
+library(pROC)
+library(magrittr)
+library(tidyverse)
+library(stringr)
+source("input/datamining_library_ge20200902.R")
+
+mat<-readRDS("mat.rds")
+info<-readRDS("info_filtered.rds")
+### AGBC_GGCC
+library(RColorBrewer)
+AGBC_GGCC1<-mat[which(mat$subtype %in% c("AG","GG","BC","CC")),-c(2:12)]
+AGBC_GGCC2<-AGBC_GGCC1[,-1]
+row.names(AGBC_GGCC2)<-AGBC_GGCC1$batch
+AGBC_GGCC2[is.na(AGBC_GGCC2)]<-NA
+
+###Delete NA70%
+AGBC_GGCC3<-AGBC_GGCC2[, apply(AGBC_GGCC2,2,function(x) {sum(is.na(x))/nrow(AGBC_GGCC2)}) < 0.7]
+
+
+AGBC_GGCC3$batch<-row.names(AGBC_GGCC3)
+AGBC_GGCC4<-merge(info,AGBC_GGCC3,by="batch",all=F)
+AGBC_GGCC5<-AGBC_GGCC4[AGBC_GGCC4$subtype.x %in% c("AG","GG","BC","CC"),]
+AGBC_GGCC6<-aggregate(AGBC_GGCC5[,-c(1:14)],  by=list(AGBC_GGCC5$pathology),  mean,na.rm=T)
+
+
+names(AGBC_GGCC6)<-c("pathology",names(AGBC_GGCC6[,-1]))
+AGBC_GGCC7<-merge(data.frame(unique(AGBC_GGCC5[,c("pathology","subtype.x")])),AGBC_GGCC6,by.x ="pathology",all.Y=F)
+
+AGBC_GGCC8<-AGBC_GGCC7[,-1]
+row.names(AGBC_GGCC8)<-AGBC_GGCC7$pathology
+AGBC_GGCC9<-data.frame(AGBC_GGCC8[,1],(AGBC_GGCC8[,-1]))
+names(AGBC_GGCC9)<-c("label",names(AGBC_GGCC9[,-1]))
+AGBC_GGCC9.1<-log2(AGBC_GGCC9[,-1])
+AGBC_GGCC9.1$label<-AGBC_GGCC9$label
+AGBC_GGCC9<-AGBC_GGCC9.1
+AGBC_GGCC9[is.na(AGBC_GGCC9)]<-0
+#####AGBC_GGCC9 is the training matrix
+
+
+
+AGGG_valid<-read.table("input/20211019KRUK_A_protein_matrix_rename.txt",sep = "\t",stringsAsFactors = F,header = T)
+AGGG_valid2<-AGGG_valid
+AGGG_valid4<-AGGG_valid2[,-c(1)]
+row.names(AGGG_valid4)<-paste0(AGGG_valid2$prot)
+AGGG_valid5<-data.frame(t(AGGG_valid4))
+AG_valid<-AGGG_valid5[grep("AG",row.names(AGGG_valid5)),]
+GG_valid<-AGGG_valid5[grep("GG",row.names(AGGG_valid5)),]
+AGGG_valid6<-data.frame(rbind(AG_valid, GG_valid))
+AGGG_sampleName<-data.frame(str_split_fixed(c(row.names(AGGG_valid6)),pattern = "_",10))
+AGGG_sampleName2<-gsub("_rep","",AGGG_sampleName[,10])
+AGGG_valid7<-aggregate(AGGG_valid6, by=list(AGGG_sampleName2), mean, na.rm=T)
+AGGG_valid8<-AGGG_valid7[,-1]
+AGGG_valid9<-log2(AGGG_valid8)
+AGGG_valid9[is.na(AGGG_valid9)]<-0
+row.names(AGGG_valid9)<-AGGG_valid7$Group.1
+
+row.names(AGGG_valid9)<-gsub(".raw","",row.names(AGGG_valid9))
+AGGG_valid10<-AGGG_valid9[row.names(AGGG_valid9) %in% patient_name$X5 , ]
+AGGG_valid10$label<-row.names(AGGG_valid10)
+AGGG_valid10$label<-gsub("[0-9]","",AGGG_valid10$label)
+# AGGG_valid10[AGGG_valid10==0]<-NA
+###delete GG4   too much NA 
+AGGG_valid10<-AGGG_valid10[!row.names(AGGG_valid10)=="GG4",]
+#####AGGG_valid10 is the test matrix
+BCCC_valid<-read.table("input/202101022KRUK_B_protein_matrix.txt",sep = "\t",stringsAsFactors = F,header = T)
+BCCC_sampleName<-data.frame(str_split_fixed(c(names(BCCC_valid)),pattern = "_",10))
+names(BCCC_valid)<-BCCC_sampleName$X10
+row.names(BCCC_valid)<-BCCC_valid[,1]
+BCCC_valid2<-BCCC_valid[,grep("BC|CC",names(BCCC_valid))]
+names(BCCC_valid2)<-gsub(".raw","",names(BCCC_valid2))
+BCCC_valid3<-data.frame(t(BCCC_valid2))
+BCCC_valid3$sample<-row.names(BCCC_valid3)
+BCCC_valid3$sample<-gsub("_rep","",BCCC_valid3$sample)
+BCCC_valid4<-aggregate(BCCC_valid3[,-ncol(BCCC_valid3)],by=list(BCCC_valid3$sample),mean,na.rm=T)
+BCCC_valid5<-BCCC_valid4[,-1]
+row.names(BCCC_valid5)<-BCCC_valid4$Group.1
+BCCC_valid6<-data.frame(t(BCCC_valid5))
+BCCC_valid6$prot<-row.names(BCCC_valid6)
+BCCC_protname<-data.frame(bitr(BCCC_valid6$prot, fromType = "UNIPROT",toType = "SYMBOL",OrgDb = "org.Hs.eg.db"))
+BCCC_protname$prot<-paste0(BCCC_protname$UNIPROT,"_",BCCC_protname$SYMBOL)
+names(BCCC_protname)<-c("prot","gene","name")
+BCCC_valid7<-merge(BCCC_protname,BCCC_valid6,by="prot",all=T)
+BCCC_valid8<-log2(BCCC_valid7[,-c(1:3)])
+BCCC_valid7<-cbind(BCCC_valid7[,c(1:3)],BCCC_valid8)
+
+
+AGGG_valid11<-data.frame(t(AGGG_valid10))
+AGGG_valid11$name<-row.names(AGGG_valid11)
+valid<-merge(BCCC_valid7[,-c(1:2)],AGGG_valid11,by="name",all=T)
+valid1<-data.frame(apply(valid[,-1],2, function(x) {as.numeric(x)}))
+valid1[is.na(valid1)]<-0
+valid1[valid1==0]<-NA
+valid1$prot<-valid$name
+valid2<-valid1[apply(valid1[,-ncol(valid1)],1,function(x) {sum(is.na(x))/ncol(valid1[,-ncol(valid1)])})<0.7,]
+valid3<-valid2[valid2$prot %in% names(AGBC_GGCC9), ]
+valid4<-valid3[,-ncol(valid3)]
+row.names(valid4)<-valid3$prot
+valid5<-data.frame(t(valid4))
+valid5$label<-row.names(valid5)
+valid5$label<-gsub("[0-9]","",valid5$label)
+
+
+valid5[is.na(valid5)]<-0
+###valid5 is valid matrix
+# write.csv(valid6,"RandomForest/KMDR_valid_matrix.csv")
+
+###for AG GG
+AG_GG_pathway_prot<-read.csv("AG_GG_pathwayprot.csv")
+AG_GG_train<-AGBC_GGCC9[,names(AGBC_GGCC9) %in% AG_GG_pathway_prot$X]
+AG_GG_train$label<-AGBC_GGCC9$label
+AG_GG_train<-AG_GG_train[AG_GG_train$label %in% c("AG","GG"),]
+AG_GG_valid<-valid5[valid5$label %in% c("AG","GG"),]
+
+set.seed(2022)
+tmpRF_AG_GG <- randomForest(as.factor(label) ~ . ,data=AG_GG_train,importance=T,ntree=1000,nodesize=1)
+result_AG_GG <- data.frame(importance(tmpRF_AG_GG,type=1))
+feature<-result_AG_GG %>%  top_n(10, MeanDecreaseAccuracy)
+feature$MeanDecreaseAccuracy<-row.names(feature)
+# plot(tmpRF_BC_CC)
+
+varImpPlot(tmpRF_AG_GG)
+
+
+
+trainsModel<-AG_GG_train[,names(AG_GG_train)%in% feature$MeanDecreaseAccuracy ]
+trainsModel$label<-AG_GG_train$label
+validsModel<-AG_GG_valid[,names(AG_GG_valid) %in% names(AG_GG_train)]
+
+
+for (aa in 3) {
+accu <- c()
+for (i in aa) {
+feature2 <-data.frame(combn(c( 1:nrow(feature)),i))
+for (m in 1) {
+feature3<-as.numeric(feature2[,m])
+result1<-c(as.matrix(feature[feature3,1]))
+set.seed(2020.3)
+for (k in 1:2) {
+fold= as.vector(unlist(folds[1]))
+trains <- data.frame(trainsModel[,result1])
+trains$label<-trainsModel$label
+trains_cross <- data.frame(trains[setdiff(1:dim(trains)[1],fold),])
+test_cross <- data.frame(trains[fold,])
+valids <- data.frame(validsModel[,result1])
+valids$label <- validsModel$label
+tmpRF_cross <- randomForest(as.factor(label) ~ . ,data=trains_cross,importance=T,ntree=1000,nodesize=1,proximity=T)
+tmpRF <- randomForest(as.factor(label) ~ . ,data=trains,importance=T,ntree=1000,nodesize=1,proximity=T)
+predicts<- data.frame(predict(tmpRF,valids,type='prob'))
+predicts$predicted <- apply(predicts,1,function(v){names(v)[max(v)==v]})
+predicts$observed <- valids$label
+ ROC <- roc(predicts$observed, as.numeric(predicts$AG))
+         auc <- as.numeric(ROC[["auc"]])
+      	 acc <- sum(predicts$predicted==predicts$observed)
+  train_model_predict<-data.frame(tmpRF$votes,tmpRF$predicted, trainsModel$label)
+names(train_model_predict)<-c("AG", "GG","predicted", "observed" )
+ROC_train_model_predict <- roc(train_model_predict$observed, as.numeric(train_model_predict$AG))
+ROC_train_model_predict_auc <- as.numeric(ROC_train_model_predict[["auc"]])
+train_model_predict_cross<-data.frame(tmpRF_cross$votes,tmpRF_cross$predicted, trains_cross$label)
+names(train_model_predict_cross)<-c("AG", "GG","predicted", "observed" )
+ROC_train_model_predict_cross <- roc(train_model_predict_cross$observed, as.numeric(train_model_predict_cross$AG))
+ROC_train_model_predict_auc_cross <- as.numeric(ROC_train_model_predict_cross[["auc"]])
+predicts_cross<- data.frame(predict(tmpRF_cross,test_cross,type='prob'))
+predicts_cross$predicted <- apply(predicts_cross,1,function(v){names(v)[max(v)==v]})
+predicts_cross$observed <- test_cross$label
+ ROC_cross <- roc(predicts_cross$observed, as.numeric(predicts_cross$AG))
+         auc_cross <- as.numeric(ROC_cross[["auc"]])
+      	 acc_cross <- sum(predicts_cross$predicted==predicts_cross$observed)
+	 
+      	 sum<-c(i,m, k,acc/25,auc,ROC_train_model_predict_auc,acc_cross/nrow(test_cross),auc_cross,ROC_train_model_predict_auc_cross )
+         accu <- data.frame(rbind(accu,sum))
+         
+}
+}
+}
+}
+
+###plot model
+
+pointLine<- 0
+  
+##ROC
+train_model_predict<-data.frame(tmpRF$votes,tmpRF$predicted, trainsModel$label)
+names(train_model_predict)<-c("AG", "GG","predicted", "observed" )
+ROC_train_model_predict <- roc(train_model_predict$observed, as.numeric(train_model_predict$AG))
+ROC_train_model_predict_auc <- as.numeric(ROC_train_model_predict[["auc"]])
+
+plot(ROC_train_model_predict,cor="blue",main= ROC_train_model_predict_auc)
+
+plot(ROC,cor="blue",main= auc)
+
+##Confusion matrix
+library(dplyr)
+train_model_comfusion<-train_model_predict
+train_model_comfusion$predicted<-ifelse(train_model_comfusion$GG > pointLine, "GG", "AG")
+Train_comfusion<-confusionMatrix( factor(train_model_comfusion$predicted, levels = c( "AG","GG")),factor(train_model_comfusion$observed, levels = c( "AG","GG")))
+
+test_model_comfusion<-predicts
+test_model_comfusion$predicted<-ifelse(test_model_comfusion$GG > pointLine, "GG", "AG")
+
+Test_comfusion<-confusionMatrix( factor(test_model_comfusion$predicted, levels = c( "AG","GG")),factor(test_model_comfusion$observed, levels = c( "AG","GG")))
+
+
+
+
+  ##point plot
+  mean <- apply( valids[,-ncol(valids)],1,mean)
+  data <- data.frame(mean,predicts=predicts$GG,sample2=row.names(predicts),type2=predicts$observed )
+  
+  ge.plot.point <- function(data,sample,value,type,group,title="",xlab="sample",ylab="value"){
+    a <- ggplot(data,aes(x=sample,y=value,group=group,color=group))+ 
+      geom_point()+geom_vline(xintercept = pointLine ,linetype="dotted")+
+      ggtitle(paste0(title,"_pointplot"))+
+      xlab(xlab)+
+      ylab(ylab)+
+      xlim(0,1)+
+      theme(legend.text = element_text(size = 15,color = "black"),legend.position = 'top',
+            legend.title = element_text(size=15,color="black") ,
+            panel.grid.major =element_blank(),
+            panel.grid.minor = element_blank(),
+            panel.background = element_blank(),
+            axis.line = element_line(colour = "black"))+
+      scale_color_manual(values=c("#FDB462","#BC80BD"))+
+      theme(panel.grid =element_blank())+
+      theme(axis.text = element_text(size = 10,color = "black"))+
+      theme(axis.text.x = element_text( hjust = 0.5))+
+      theme(plot.subtitle=element_text(size=30, hjust=0, color="black"))+
+      theme(axis.title.x=element_text(size=17, hjust=0.5, color="black"))+
+      theme(axis.title.y=element_text(size=17, hjust=0.5, color="black"))+  geom_text(aes(label=type,vjust = -0.5, hjust = 0.3),size = 2,show.legend = FALSE)
+    ggsave(paste0(title,"_pointplot.pdf"),plot=a,width=4,height=6)
+  }
+  
+  ge.plot.point(data,data$predicts,data$mean,data$sample2,data$type2, "AG_GG_PointPlot_test","predict value","mean")
+
+ mean <- apply( trains[,-ncol(trains)],1,mean)
+  data <- data.frame(mean,predicts=train_model_predict$GG,sample2=row.names(train_model_predict),type2=train_model_predict$observed )
+  # data$sample2<-gsub(".Total.Area.Fragment","",data$sample2)
+  # data$sample2<-gsub("H20210803yixiao_KRUK_MRM_60min_","",data$sample2)
+  # data$sample2<-gsub("_20210805133011","",data$sample2)
+  # data$sample2<-gsub("_20210805144702","",data$sample2)
+  ge.plot.point <- function(data,sample,value,type,group,title="",xlab="sample",ylab="value"){
+    a <- ggplot(data,aes(x=sample,y=value,group=group,color=group))+ 
+      geom_point()+geom_vline(xintercept = pointLine ,linetype="dotted")+
+      ggtitle(paste0(title,"_pointplot"))+
+      xlab(xlab)+
+      ylab(ylab)+
+      xlim(0,1)+
+      theme(legend.text = element_text(size = 15,color = "black"),legend.position = 'top',
+            legend.title = element_text(size=15,color="black") ,
+            panel.grid.major =element_blank(),
+            panel.grid.minor = element_blank(),
+            panel.background = element_blank(),
+            axis.line = element_line(colour = "black"))+
+      scale_color_manual(values=c("#FDB462","#BC80BD"))+
+      theme(panel.grid =element_blank())+
+      theme(axis.text = element_text(size = 10,color = "black"))+
+      theme(axis.text.x = element_text( hjust = 0.5))+
+      theme(plot.subtitle=element_text(size=30, hjust=0, color="black"))+
+      theme(axis.title.x=element_text(size=17, hjust=0.5, color="black"))+
+      theme(axis.title.y=element_text(size=17, hjust=0.5, color="black"))+  geom_text(aes(label=type,vjust = -0.5, hjust = 0.3),size = 2,show.legend = FALSE)
+    ggsave(paste0(title,"_pointplot.pdf"),plot=a,width=4,height=6)
+  }
+  ge.plot.point(data,data$predicts,data$mean,data$sample2,data$type2, "AG_GG_PointPlot_train","predict value","mean")
+  
+#########for BC CC cross-validation
+BC_CC_pathway_prot<-read.csv("BC_CC_pathwayprot.csv")
+BC_CC_train<-AGBC_GGCC9[,names(AGBC_GGCC9) %in% BC_CC_pathway_prot$X]
+BC_CC_train$label<-AGBC_GGCC9$label
+BC_CC_train<-BC_CC_train[BC_CC_train$label %in% c("BC","CC"),]
+BC_CC_valid<-valid5[valid5$label %in% c("BC","CC"),]
+
+###BC_CC_valid is BC_CC train matrix
+set.seed(2022)
+tmpRF_BC_CC <- randomForest(as.factor(label) ~ . ,data=BC_CC_train,importance=T,ntree=1000,nodesize=1)
+result_BC_CC <- data.frame(importance(tmpRF_BC_CC,type=1))
+feature<-result_BC_CC %>%  top_n(10, MeanDecreaseAccuracy)
+feature$MeanDecreaseAccuracy<-row.names(feature)
+# plot(tmpRF_BC_CC)
+varImpPlot(tmpRF_BC_CC)
+
+trainsModel<-BC_CC_train[,names(BC_CC_train)%in% feature$MeanDecreaseAccuracy ]
+trainsModel$label<-BC_CC_train$label
+validsModel<-BC_CC_valid[,names(BC_CC_valid) %in% names(trainsModel)]
+
+for (aa in 5) {
+accu <- c()
+for (i in aa) {
+feature2 <-data.frame(combn(c( 1:nrow(feature)),i))
+for (m in 33 ) {
+feature3<-as.numeric(feature2[,m])
+result1<-c(as.matrix(feature[feature3,1]))
+for (k in 1:2) {
+  set.seed(2020.3)
+fold= as.vector(unlist(folds[1]))
+trains <- data.frame(trainsModel[,result1])
+trains$label<-trainsModel$label
+trains_cross <- data.frame(trains[setdiff(1:dim(trains)[1],fold),])
+test_cross <- data.frame(trains[fold,])
+valids <- data.frame(validsModel[,result1])
+valids$label <- validsModel$label
+tmpRF_cross <- randomForest(as.factor(label) ~ . ,data=trains_cross,importance=T,ntree=1000,nodesize=1,proximity=T)
+tmpRF <- randomForest(as.factor(label) ~ . ,data=trains,importance=T,ntree=1000,nodesize=1,proximity=T)
+predicts<- data.frame(predict(tmpRF,valids,type='prob'))
+predicts$predicted <- apply(predicts,1,function(v){names(v)[max(v)==v]})
+predicts$observed <- valids$label
+ ROC <- roc(predicts$observed, as.numeric(predicts$BC))
+         auc <- as.numeric(ROC[["auc"]])
+      	 acc <- sum(predicts$predicted==predicts$observed)
+  train_model_predict<-data.frame(tmpRF$votes,tmpRF$predicted, trainsModel$label)
+names(train_model_predict)<-c("BC", "CC","predicted", "observed" )
+ROC_train_model_predict <- roc(train_model_predict$observed, as.numeric(train_model_predict$BC))
+ROC_train_model_predict_auc <- as.numeric(ROC_train_model_predict[["auc"]])
+train_model_predict_cross<-data.frame(tmpRF_cross$votes,tmpRF_cross$predicted, trains_cross$label)
+names(train_model_predict_cross)<-c("BC", "CC","predicted", "observed" )
+ROC_train_model_predict_cross <- roc(train_model_predict_cross$observed, as.numeric(train_model_predict_cross$BC))
+ROC_train_model_predict_auc_cross <- as.numeric(ROC_train_model_predict_cross[["auc"]])
+predicts_cross<- data.frame(predict(tmpRF_cross,test_cross,type='prob'))
+predicts_cross$predicted <- apply(predicts_cross,1,function(v){names(v)[max(v)==v]})
+predicts_cross$observed <- test_cross$label
+ ROC_cross <- roc(predicts_cross$observed, as.numeric(predicts_cross$BC))
+         auc_cross <- as.numeric(ROC_cross[["auc"]])
+      	 acc_cross <- sum(predicts_cross$predicted==predicts_cross$observed)
+	 
+      	 sum<-c(i,m, k,acc/53,auc,ROC_train_model_predict_auc,acc_cross/nrow(test_cross),auc_cross,ROC_train_model_predict_auc_cross )
+         accu <- data.frame(rbind(accu,sum))
+         
+}
+}
+}
+names(accu)<-c("i","m","k","acc","test_auc","train_auc","acc_cross","test_auc_cross","train_auc_cross")
+accu1 <- accu
+accu2<-aggregate(accu1[,-3],by=list(accu1$m,accu1$i),mean)
+
+}
+
+###plot model
+
+pointLine<-0.5
+##ROC
+train_model_predict<-data.frame(tmpRF$votes,tmpRF$predicted, trainsModel$label)
+names(train_model_predict)<-c("BC", "CC","predicted", "observed" )
+ROC_train_model_predict <- roc(train_model_predict$observed, as.numeric(train_model_predict$BC))
+ROC_train_model_predict_auc <- as.numeric(ROC_train_model_predict[["auc"]])
+
+plot(ROC_train_model_predict,cor="blue",main= ROC_train_model_predict_auc)
+plot(ROC,cor="blue",main= auc)
+
+
+##Confusion matrix
+
+library(dplyr)
+train_model_comfusion<-train_model_predict
+train_model_comfusion$predicted<-ifelse(train_model_comfusion$CC > pointLine, "CC", "BC")
+Train_comfusion<-confusionMatrix( factor(train_model_comfusion$predicted, levels = c(  "CC", "BC")),factor(train_model_comfusion$observed, levels = c( "CC","BC")))
+
+test_model_comfusion<-predicts
+test_model_comfusion$predicted<-ifelse(test_model_comfusion$CC > pointLine,  "CC", "BC")
+
+Test_comfusion<-confusionMatrix( factor(test_model_comfusion$predicted, levels = c("CC", "BC")),factor(test_model_comfusion$observed, levels = c("CC", "BC")))
+
+  ##point plot
+  mean <- apply( valids[,-ncol(valids)],1,mean)
+  data <- data.frame(mean,predicts=predicts$CC,sample2=row.names(predicts),type2=predicts$observed )
+  
+  ge.plot.point <- function(data,sample,value,type,group,title="",xlab="sample",ylab="value"){
+    a <- ggplot(data,aes(x=sample,y=value,group=group,color=group))+ 
+      geom_point()+geom_vline(xintercept = pointLine ,linetype="dotted")+
+      ggtitle(paste0(title,"_pointplot"))+
+      xlab(xlab)+
+      ylab(ylab)+
+      xlim(0,1)+
+      theme(legend.text = element_text(size = 15,color = "black"),legend.position = 'top',
+            legend.title = element_text(size=15,color="black") ,
+            panel.grid.major =element_blank(),
+            panel.grid.minor = element_blank(),
+            panel.background = element_blank(),
+            axis.line = element_line(colour = "black"))+
+      scale_color_manual(values=c("#FDB462","#BC80BD"))+
+      theme(panel.grid =element_blank())+
+      theme(axis.text = element_text(size = 10,color = "black"))+
+      theme(axis.text.x = element_text( hjust = 0.5))+
+      theme(plot.subtitle=element_text(size=30, hjust=0, color="black"))+
+      theme(axis.title.x=element_text(size=17, hjust=0.5, color="black"))+
+      theme(axis.title.y=element_text(size=17, hjust=0.5, color="black"))+  geom_text(aes(label=type,vjust = -0.5, hjust = 0.3),size = 2,show.legend = FALSE)
+    ggsave(paste0(title,"_pointplot.pdf"),plot=a,width=4,height=6)
+  }
+  
+  
+  ge.plot.point(data,data$predicts,data$mean,data$sample2,data$type2, "BC_CC_PointPlot_test_","predict value","mean")
+
+ mean <- apply( trains[,-ncol(trains)],1,mean)
+  data <- data.frame(mean,predicts=train_model_predict$CC,sample2=row.names(train_model_predict),type2=train_model_predict$observed )
+  # data$sample2<-gsub(".Total.Area.FrBCment","",data$sample2)
+  # data$sample2<-gsub("H20210803yixiao_KRUK_MRM_60min_","",data$sample2)
+  # data$sample2<-gsub("_20210805133011","",data$sample2)
+  # data$sample2<-gsub("_20210805144702","",data$sample2)
+  ge.plot.point <- function(data,sample,value,type,group,title="",xlab="sample",ylab="value"){
+    a <- ggplot(data,aes(x=sample,y=value,group=group,color=group))+ 
+      geom_point()+geom_vline(xintercept = pointLine ,linetype="dotted")+
+      ggtitle(paste0(title,"_pointplot"))+
+      xlab(xlab)+
+      ylab(ylab)+
+      xlim(0,1)+
+      theme(legend.text = element_text(size = 15,color = "black"),legend.position = 'top',
+            legend.title = element_text(size=15,color="black") ,
+            panel.grid.major =element_blank(),
+            panel.grid.minor = element_blank(),
+            panel.background = element_blank(),
+            axis.line = element_line(colour = "black"))+
+      scale_color_manual(values=c("#FDB462","#BC80BD"))+
+      theme(panel.grid =element_blank())+
+      theme(axis.text = element_text(size = 10,color = "black"))+
+      theme(axis.text.x = element_text( hjust = 0.5))+
+      theme(plot.subtitle=element_text(size=30, hjust=0, color="black"))+
+      theme(axis.title.x=element_text(size=17, hjust=0.5, color="black"))+
+      theme(axis.title.y=element_text(size=17, hjust=0.5, color="black"))+  geom_text(aes(label=type,vjust = -0.5, hjust = 0.3),size = 2,show.legend = FALSE)
+    ggsave(paste0(title,"_pointplot.pdf"),plot=a,width=4,height=6)
+  }
+  ge.plot.point(data,data$predicts,data$mean,data$sample2,data$type2, "BC_CC_PointPlot_train","predict value","mean")
+  
+  
+ 
+
+
+
+
+
+
+```
+
